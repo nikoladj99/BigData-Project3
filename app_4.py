@@ -3,12 +3,14 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from pyspark.ml.classification import DecisionTreeClassificationModel
 from pyspark.ml.feature import VectorAssembler
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 import json
 
 spark = SparkSession.builder.appName("PySpark_Kafka_Consumer").getOrCreate()
 
 df = spark \
-  .read \
+  .readStream \
   .format("kafka") \
   .option("kafka.bootstrap.servers", "kafka:9092") \
   .option("subscribe", "topic2") \
@@ -34,30 +36,53 @@ parsed_df = parsed_df.withColumn('check_in_time', unix_timestamp('check_in_time'
 parsed_df = parsed_df.withColumn("user", parsed_df["user"].cast(IntegerType()))
 parsed_df = parsed_df.withColumn("latitude", parsed_df["latitude"].cast(DoubleType()))
 parsed_df = parsed_df.withColumn("longitude", parsed_df["longitude"].cast(DoubleType()))
-parsed_df.show()
 
-# Učitajte model za klasifikaciju
-model_path = "DecisionTreeModel"
+# Ucitavanje modela
+model_path = "hdfs://namenode:9000/DecisionTreeModel_5"
 dt_model = DecisionTreeClassificationModel.load(model_path)
 
-# Definišite skup kolona koji će se koristiti za predviđanje
 assembler = VectorAssembler(
     inputCols=["user", "check_in_time", "latitude", "longitude"],
     outputCol="features")
 
-# Pretvorite podatke u format koji može da se koristi za predviđanje
 parsed_df = assembler.transform(parsed_df)
 
-# Primijenite model za klasifikaciju i dodajte predikcije kao novu kolonu u DataFrame
+# Klasifikacija
 predictions = dt_model.transform(parsed_df)
 
 predictions = predictions.withColumn("check_in_time", from_unixtime("check_in_time", "yyyy-MM-dd HH:mm:ss.SSS"))
-predictions.select("user", "check_in_time", "latitude", "longitude", "prediction") \
-           .withColumnRenamed("prediction", "visit_in_worktime") \
-           .show(100, False)
+predictions = predictions.withColumn("prediction", when(col("prediction") >= 0.5, 1.0).otherwise(0.0))
 
-filtered_predictions = predictions.filter(predictions.prediction == 1)
-filtered_predictions.select("user", "check_in_time", "latitude", "longitude", "prediction") \
-           .withColumnRenamed("prediction", "visit_in_worktime") \
-           .show()
+# UPIS U INFLUXDB 
+
+def write_to_influxdb(df, epoch_id):
+    # Inicijalizacija InfluxDB klijenta
+    token = "Xl99hGe7tyPW-wWrgpZRo8vOxA6bK2nR-X3MEoqkigZqnSG1vSqpKOoBmLZdWpWbYKKMKNEfqAAX4FMoKhd5ug=="
+    org = "brightkite-org"
+    bucket = "brightkite-bucket"
+    client = InfluxDBClient(url="http://influxdb:8086", token=token)
+
+    # Kreiranje instance WriteApi klase
+    write_api = client.write_api(write_options=SYNCHRONOUS)
+
+    for row in df.collect():
+        point = Point("predictions_5b") \
+            .field("user", row.user) \
+            .field("latitude", row.latitude) \
+            .field("longitude", row.longitude) \
+            .field("visit_in_worktime", row.prediction)
+        write_api.write(bucket=bucket, org=org, record=point)
+
+stream = predictions.writeStream \
+    .outputMode("update") \
+    .foreachBatch(write_to_influxdb) \
+    .trigger(processingTime="10 seconds") \
+    .start()
+
+stream.awaitTermination()       
+
+
+
+
+
 
