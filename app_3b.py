@@ -6,8 +6,13 @@ from pyspark.ml.feature import VectorAssembler
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 import json
+import sys
 
-spark = SparkSession.builder.appName("PySpark_Kafka_Consumer").getOrCreate()
+if len(sys.argv) != 2:
+    print("Neadekvatan broj argumenata.")
+    exit(-1)
+
+spark = SparkSession.builder.appName("Project_3B").getOrCreate()
 
 df = spark \
   .readStream \
@@ -38,7 +43,7 @@ parsed_df = parsed_df.withColumn("latitude", parsed_df["latitude"].cast(DoubleTy
 parsed_df = parsed_df.withColumn("longitude", parsed_df["longitude"].cast(DoubleType()))
 
 # Ucitavanje modela
-model_path = "hdfs://namenode:9000/DecisionTreeModel_5"
+model_path = sys.argv[1]
 dt_model = DecisionTreeClassificationModel.load(model_path)
 
 assembler = VectorAssembler(

@@ -7,11 +7,11 @@ from pyspark.sql.functions import unix_timestamp
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.mllib.evaluation import MulticlassMetrics
 
-if len(sys.argv) != 2:
+if len(sys.argv) != 3:
     print("Neadekvatan broj argumenata.")
     exit(-1)
 
-spark = SparkSession.builder.appName("Project_3").getOrCreate()
+spark = SparkSession.builder.appName("Project_3A").getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
 
 # Ucitavanje podataka
@@ -45,7 +45,7 @@ test = assembler.transform(test).select("features", "visit_in_worktime")
 # Kreiranje i treniranje Decision Tree klasifikatora
 dt = DecisionTreeClassifier(featuresCol="features", labelCol="visit_in_worktime")
 model = dt.fit(train)
-model.save("hdfs://namenode:9000/DecisionTreeModel_10")
+model.save(sys.argv[2])
 
 # Klasifikacija test set-a
 predictions = model.transform(test)
